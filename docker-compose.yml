@@ -127,6 +127,13 @@ services:
       - GUNICORN_THREADS=${GUNICORN_THREADS:-8}
       # IBKR/MT5 need local TWS or MT5 terminal; set false on SaaS cloud (see env.example).
       - ALLOW_LOCAL_DESKTOP_BROKERS=${ALLOW_LOCAL_DESKTOP_BROKERS:-true}
+      # Spot full close / open fee buffer (Admin → Settings → Live Trading, or backend_api_python/.env)
+      - SPOT_CLOSE_SAFETY_RATIO=${SPOT_CLOSE_SAFETY_RATIO:-0.998}
+      - SPOT_OPEN_QUOTE_BUFFER=${SPOT_OPEN_QUOTE_BUFFER:-0.995}
+      - PROXY_URL=${PROXY_URL:-}
+      - HTTP_PROXY=${PROXY_URL:-}
+      - HTTPS_PROXY=${PROXY_URL:-}
+      - ALL_PROXY=${PROXY_URL:-}
     networks:
       - quantdinger-network
     healthcheck:

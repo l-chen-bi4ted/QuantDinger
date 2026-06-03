@@ -134,6 +134,9 @@ services:
       - HTTP_PROXY=${PROXY_URL:-}
       - HTTPS_PROXY=${PROXY_URL:-}
       - ALL_PROXY=${PROXY_URL:-}
+      # Takes precedence over mounted .env (run.py load_dotenv override=False).
+      # Include :8000 when using Vite dev server alongside this stack.
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8888,http://localhost:8000}
     networks:
       - quantdinger-network
     healthcheck:

@@ -15,6 +15,7 @@ logger = get_logger(__name__)
 
 # IANA timezone id subset check (e.g. Asia/Shanghai, America/New_York)
 _TIMEZONE_ID_RE = re.compile(r'^[A-Za-z0-9_/+\-.]+$')
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 
 # Try to import bcrypt for secure password hashing
 try:
@@ -57,6 +58,7 @@ class UserService:
     """User management service"""
 
     _password_changed_column_ready = False
+    BOOTSTRAP_DEFAULT_PASSWORD = '123456'
     
     # Available roles (ordered by privilege level)
     ROLES = ['viewer', 'user', 'manager', 'admin']
@@ -120,6 +122,216 @@ class UserService:
         except Exception as e:
             logger.warning(f"mark_password_changed failed for user {user_id}: {e}")
 
+    @classmethod
+    def _configured_admin_password(cls) -> str:
+        """Return the current bootstrap admin password from env/config."""
+        try:
+            from app.config.settings import Config
+            return str(Config.ADMIN_PASSWORD or '')
+        except Exception:
+            return str(os.getenv('ADMIN_PASSWORD', '') or '')
+
+    @classmethod
+    def _configured_admin_username(cls) -> str:
+        """Return the configured bootstrap admin username."""
+        try:
+            from app.config.settings import Config
+            return str(Config.ADMIN_USER or os.getenv('ADMIN_USER', 'quantdinger') or 'quantdinger').strip()
+        except Exception:
+            return str(os.getenv('ADMIN_USER', 'quantdinger') or 'quantdinger').strip()
+
+    @classmethod
+    def _configured_admin_email(cls) -> str:
+        """Return the configured bootstrap admin email."""
+        try:
+            from app.config.settings import Config
+            return str(getattr(Config, 'ADMIN_EMAIL', '') or os.getenv('ADMIN_EMAIL', '') or '').strip()
+        except Exception:
+            return str(os.getenv('ADMIN_EMAIL', '') or '').strip()
+
+    @staticmethod
+    def _normalize_email(email: Optional[str]) -> str:
+        return str(email or '').strip().lower()
+
+    @classmethod
+    def _is_bootstrap_default_plain_password(cls, password: str) -> bool:
+        return str(password or '') == cls.BOOTSTRAP_DEFAULT_PASSWORD
+
+    @classmethod
+    def _configured_admin_password_is_default(cls) -> bool:
+        return cls._is_bootstrap_default_plain_password(cls._configured_admin_password())
+
+    def _password_hash_matches_bootstrap_default(self, password_hash: str) -> bool:
+        password_hash = str(password_hash or '').strip()
+        if not password_hash:
+            return False
+        return self.verify_password(self.BOOTSTRAP_DEFAULT_PASSWORD, password_hash)
+
+    def _initial_password_state(self, password_hash: str, password_changed_at: Any) -> str:
+        """
+        Classify bootstrap password state for the first user.
+
+        Returns:
+            ok: no reminder/action needed
+            must_change: still using the unsafe built-in default password
+            sync_env_password: env ADMIN_PASSWORD is non-default but DB still has 123456
+            mark_changed: DB password is non-default, but password_changed_at was never set
+        """
+        if password_changed_at is not None:
+            return 'ok'
+        if not str(password_hash or '').strip():
+            return 'ok'
+        if self._password_hash_matches_bootstrap_default(password_hash):
+            if self._configured_admin_password_is_default():
+                return 'must_change'
+            return 'sync_env_password'
+        return 'mark_changed'
+
+    def _sync_bootstrap_admin_password_from_env(self, user_id: int, password_hash: str) -> bool:
+        """
+        If operators changed ADMIN_PASSWORD in .env after DB bootstrap, migrate the
+        first user's DB password away from the hard-coded default.
+        """
+        env_password = self._configured_admin_password()
+        if self._is_bootstrap_default_plain_password(env_password):
+            return False
+        if not env_password:
+            return False
+        if not self._password_hash_matches_bootstrap_default(password_hash):
+            return False
+
+        try:
+            new_hash = self.hash_password(env_password)
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute(
+                    """
+                    UPDATE qd_users
+                    SET password_hash = ?, password_changed_at = NOW(), updated_at = NOW()
+                    WHERE id = ?
+                    """,
+                    (new_hash, user_id),
+                )
+                db.commit()
+                cur.close()
+            logger.info("Synchronized bootstrap admin password from non-default ADMIN_PASSWORD")
+            return True
+        except Exception as e:
+            logger.warning(f"sync bootstrap admin password failed for user {user_id}: {e}")
+            return False
+
+    def sync_bootstrap_admin_password_from_env(self) -> bool:
+        """Repair bootstrap admin password if env was changed after DB creation."""
+        first_id = self.get_first_user_id()
+        if first_id is None:
+            return False
+        if self._configured_admin_password_is_default():
+            return False
+
+        self.ensure_password_changed_column()
+        try:
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute(
+                    """
+                    SELECT password_hash, password_changed_at
+                    FROM qd_users WHERE id = ?
+                    """,
+                    (first_id,),
+                )
+                row = cur.fetchone()
+                cur.close()
+            if not row:
+                return False
+            state = self._initial_password_state(
+                row.get('password_hash'),
+                row.get('password_changed_at'),
+            )
+            if state != 'sync_env_password':
+                return False
+            return self._sync_bootstrap_admin_password_from_env(
+                int(first_id),
+                str(row.get('password_hash') or ''),
+            )
+        except Exception as e:
+            logger.warning(f"sync_bootstrap_admin_password_from_env failed: {e}")
+            return False
+
+    def sync_admin_email_from_config(
+        self,
+        admin_email: Optional[str] = None,
+        overwrite_existing: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Sync ADMIN_EMAIL into the bootstrap admin account.
+
+        Startup sync only fills empty/default emails. Explicit settings saves may
+        overwrite the admin account email, but never take an email used by another
+        user.
+        """
+        email = self._normalize_email(
+            admin_email if admin_email is not None else self._configured_admin_email()
+        )
+        if not email:
+            return {'synced': False, 'reason': 'empty'}
+        if email == 'admin@example.com':
+            return {'synced': False, 'reason': 'placeholder'}
+        if not _EMAIL_RE.match(email):
+            return {'synced': False, 'reason': 'invalid_email'}
+
+        try:
+            admin_username = self._configured_admin_username()
+            admin_user = self.get_user_by_username(admin_username) if admin_username else None
+            if not admin_user:
+                first_id = self.get_first_user_id()
+                admin_user = self.get_user_by_id(first_id) if first_id is not None else None
+            if not admin_user:
+                return {'synced': False, 'reason': 'admin_user_not_found'}
+
+            admin_id = int(admin_user.get('id'))
+            existing = self.get_user_by_email(email)
+            if existing and int(existing.get('id')) != admin_id:
+                return {
+                    'synced': False,
+                    'reason': 'email_in_use',
+                    'user_id': int(existing.get('id')),
+                }
+
+            current_email = self._normalize_email(admin_user.get('email'))
+            if current_email == email:
+                return {
+                    'synced': False,
+                    'reason': 'already_current',
+                    'user_id': admin_id,
+                    'email': email,
+                }
+            if current_email and current_email != 'admin@example.com' and not overwrite_existing:
+                return {
+                    'synced': False,
+                    'reason': 'existing_email_kept',
+                    'user_id': admin_id,
+                    'email': current_email,
+                }
+
+            with get_db_connection() as db:
+                cur = db.cursor()
+                cur.execute(
+                    """
+                    UPDATE qd_users
+                    SET email = ?, email_verified = TRUE, updated_at = NOW()
+                    WHERE id = ?
+                    """,
+                    (email, admin_id),
+                )
+                db.commit()
+                cur.close()
+
+            logger.info("Synchronized admin email from ADMIN_EMAIL")
+            return {'synced': True, 'user_id': admin_id, 'email': email}
+        except Exception as e:
+            logger.warning(f"sync_admin_email_from_config failed: {e}")
+            return {'synced': False, 'reason': 'error', 'message': str(e)}
+
     def get_first_user_id(self) -> Optional[int]:
         """Return the lowest user id (bootstrap / first account created on install)."""
         try:
@@ -137,9 +349,9 @@ class UserService:
 
     def must_change_initial_password(self, user_id: int) -> bool:
         """
-        True only for the first user (id = MIN(qd_users.id)) when they still use
-        the bootstrap password from deployment. Other admins are never prompted.
-        Code-login users without a password are excluded.
+        True only for the first user when they still use the unsafe built-in
+        bootstrap password (123456). Operators may set ADMIN_PASSWORD in .env;
+        if they do, a NULL password_changed_at alone must not force a prompt.
         """
         first_id = self.get_first_user_id()
         if first_id is None or int(user_id) != first_id:
@@ -163,7 +375,15 @@ class UserService:
             password_hash = str(row.get('password_hash') or '').strip()
             if not password_hash:
                 return False
-            return row.get('password_changed_at') is None
+            state = self._initial_password_state(password_hash, row.get('password_changed_at'))
+            if state == 'must_change':
+                return True
+            if state == 'sync_env_password':
+                self._sync_bootstrap_admin_password_from_env(int(user_id), password_hash)
+                return False
+            if state == 'mark_changed':
+                self.mark_password_changed(int(user_id))
+            return False
         except Exception as e:
             logger.warning(f"must_change_initial_password failed for user {user_id}: {e}")
             return False
@@ -292,7 +512,7 @@ class UserService:
             logger.error(f"get_user_by_email failed: {e}")
             return None
     
-    def authenticate(self, username: str, password: str) -> Optional[Dict[str, Any]]:
+    def authenticate(self, username: str, password: str, update_last_login: bool = True) -> Optional[Dict[str, Any]]:
         """
         Authenticate user with username/email and password.
         Supports both username and email login.
@@ -324,27 +544,33 @@ class UserService:
         if not self.verify_password(password, password_hash):
             return None
         
-        # Update last login time
+        if update_last_login:
+            self.touch_last_login(user['id'])
+        
+        # Remove password_hash from return value
+        user.pop('password_hash', None)
+        return user
+
+    def touch_last_login(self, user_id: int) -> bool:
+        """Update last_login_at after the full login flow has completed."""
         try:
             with get_db_connection() as db:
                 cur = db.cursor()
                 cur.execute(
                     "UPDATE qd_users SET last_login_at = NOW() WHERE id = ?",
-                    (user['id'],)
+                    (user_id,)
                 )
                 db.commit()
                 affected = cur.rowcount
                 cur.close()
                 if affected == 0:
-                    logger.error(f"Failed to update last_login_at: no rows affected for user_id={user['id']}")
-                else:
-                    logger.info(f"Updated last_login_at for user_id={user['id']}")
+                    logger.error(f"Failed to update last_login_at: no rows affected for user_id={user_id}")
+                    return False
+                logger.info(f"Updated last_login_at for user_id={user_id}")
+                return True
         except Exception as e:
-            logger.error(f"Failed to update last_login_at for user_id={user.get('id')}: {e}")
-        
-        # Remove password_hash from return value
-        user.pop('password_hash', None)
-        return user
+            logger.error(f"Failed to update last_login_at for user_id={user_id}: {e}")
+            return False
     
     def get_token_version(self, user_id: int) -> int:
         """
@@ -386,7 +612,6 @@ class UserService:
         try:
             with get_db_connection() as db:
                 cur = db.cursor()
-                # 递增 token_version
                 cur.execute(
                     """
                     UPDATE qd_users 
@@ -397,7 +622,6 @@ class UserService:
                 )
                 db.commit()
                 
-                # 获取新的 token_version
                 cur.execute(
                     "SELECT token_version FROM qd_users WHERE id = ?",
                     (user_id,)
@@ -493,6 +717,8 @@ class UserService:
 
                 # Seed default watchlist + builtin indicator samples for new users (FTUE)
                 if user_id:
+                    if password and not self._is_bootstrap_default_plain_password(password):
+                        self.mark_password_changed(int(user_id))
                     try:
                         _seed_default_watchlist(db, user_id)
                     except Exception as seed_err:
@@ -818,6 +1044,9 @@ class UserService:
                         'email_verified': True  # Admin email is pre-verified
                     })
                     logger.info(f"Created admin user: {admin_user} ({admin_email})")
+                else:
+                    self.sync_bootstrap_admin_password_from_env()
+                    self.sync_admin_email_from_config(overwrite_existing=False)
         except Exception as e:
             logger.error(f"ensure_admin_exists failed: {e}")
 

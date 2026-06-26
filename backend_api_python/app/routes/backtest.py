@@ -4,12 +4,12 @@ Backtest API routes
 from flask import g, jsonify, request
 from app.openapi.blueprint import HumanBlueprint as Blueprint
 from datetime import datetime
-import calendar
 import traceback
 import json
 import time
 
 from app.services.backtest import BacktestService
+from app.services.backtest_limits import validate_backtest_range
 from app.data_sources.factory import DataSourceFactory
 from app.utils.logger import get_logger
 from app.utils.db import get_db_connection
@@ -20,27 +20,6 @@ logger = get_logger(__name__)
 
 backtest_blp = Blueprint('backtest', __name__)
 backtest_service = BacktestService()
-
-
-def _add_months(dt: datetime, months: int) -> datetime:
-    """Add calendar months while keeping the day within the target month."""
-    month_index = (dt.month - 1) + int(months or 0)
-    year = dt.year + month_index // 12
-    month = month_index % 12 + 1
-    day = min(dt.day, calendar.monthrange(year, month)[1])
-    return dt.replace(year=year, month=month, day=day)
-
-
-def _backtest_range_limit(timeframe: str, start_date: datetime) -> tuple[datetime, str]:
-    """Return the max allowed end date and human-readable label for a timeframe."""
-    tf = str(timeframe or '').strip()
-    if tf == '1m':
-        return _add_months(start_date, 1), '1 month'
-    if tf == '5m':
-        return _add_months(start_date, 6), '6 months'
-    if tf in ['15m', '30m']:
-        return _add_months(start_date, 12), '1 year'
-    return _add_months(start_date, 36), '3 years'
 
 
 @backtest_blp.route('/backtest/precision-info', methods=['GET'])
@@ -113,8 +92,13 @@ def run_backtest():
         indicator_id = data.get('indicatorId')
         symbol = (data.get('symbol') or '').strip()
         market = (data.get('market') or '').strip()
-        # 数据源仅由请求里的市场分类决定（与前端自选一致）；此处只做大小写/别名规范化
         market = DataSourceFactory.normalize_market(market)
+        market_type = str(data.get('marketType') or data.get('market_type') or '').strip().lower()
+        if market_type in ('futures', 'future', 'perp', 'perpetual'):
+            market_type = 'swap'
+        if market_type not in ('spot', 'swap'):
+            market_type = ''
+        exchange_id = str(data.get('exchangeId') or data.get('exchange_id') or '').strip().lower()
         timeframe = data.get('timeframe', '1D')
         start_date_str = data.get('startDate', '')
         end_date_str = data.get('endDate', '')
@@ -158,7 +142,6 @@ def run_backtest():
             except Exception:
                 pass
 
-        # 参数验证
         if not all([indicator_code, symbol, market, timeframe, start_date_str, end_date_str]):
             return jsonify({
                 'code': 0,
@@ -174,23 +157,28 @@ def run_backtest():
                 'data': None
             }), 400
         
-        # 转换日期
-        # 开始日期：当天的 00:00:00
         start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-        # 结束日期：当天的 23:59:59，确保包含整天的数据
         end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
         
-        # 验证时间范围限制
         days_diff = (end_date - start_date).days
-        max_end_date, max_range_text = _backtest_range_limit(timeframe, start_date)
-        max_end_date = max_end_date.replace(hour=23, minute=59, second=59)
+        warmup_bars = backtest_service._estimate_warmup_bars(
+            indicator_code,
+            strategy_config.get('indicator_params') if isinstance(strategy_config, dict) else None,
+        )
+        range_error = validate_backtest_range(
+            market=market,
+            symbol=symbol,
+            timeframe=timeframe,
+            start_date=start_date,
+            end_date=end_date,
+            warmup_bars=warmup_bars,
+        )
         
-        if end_date > max_end_date:
-            max_days = (max_end_date - start_date).days
+        if range_error:
             return jsonify({
                 'code': 0,
-                'msg': f'Backtest range exceeds limit: timeframe {timeframe} supports up to {max_range_text} ({max_days} days), but you selected {days_diff} days',
-                'data': None
+                'msg': range_error['msg'],
+                'data': range_error
             }), 400
 
         # Explicit audit log so we can always trace exactly which window the user asked for.
@@ -215,12 +203,18 @@ def run_backtest():
             leverage=leverage,
             trade_direction=trade_direction,
             strategy_config=strategy_config,
+            market_type=market_type or None,
+            exchange_id=exchange_id or None,
         )
 
         ea = dict(result.get('executionAssumptions') or {})
         ea['commission'] = round(float(commission), 6)
         ea['slippage'] = round(float(slippage), 6)
         ea['strictMode'] = bool(strict_mode)
+        if market_type:
+            ea['marketType'] = market_type
+        if exchange_id:
+            ea['exchangeId'] = exchange_id
         result['executionAssumptions'] = ea
 
         run_id = None
@@ -244,6 +238,10 @@ def run_backtest():
                     'indicatorId': int(indicator_id) if indicator_id is not None else None,
                     'executionConfig': {
                         'strictMode': bool(strict_mode),
+                    },
+                    'marketConfig': {
+                        'marketType': market_type,
+                        'exchangeId': exchange_id,
                     },
                 },
                 status='success',

@@ -11,18 +11,8 @@
   <div align="center" style="max-width: 680px; margin: 1.25rem auto 0; padding: 20px 22px 22px; border: 1px solid #d1d9e0; border-radius: 16px;">
     <p style="margin: 0 0 14px; line-height: 1.65;">
       <a href="../README.md"><strong>English</strong></a>
-      <span style="color: #afb8c1;"> · </span>
-      <a href="README_CN.md"><strong>简体中文</strong></a>
-      <span style="color: #afb8c1;"> · </span>
-      <a href="README_JA.md"><strong>日本語</strong></a>
-      <span style="color: #afb8c1;"> · </span>
-      <a href="README_KO.md"><strong>한국어</strong></a>
-      <span style="color: #afb8c1;"> · </span>
-      <a href="README_TH.md"><strong>ไทย</strong></a>
-      <span style="color: #afb8c1;"> · </span>
-      <a href="README_VI.md"><strong>Tiếng Việt</strong></a>
-      <span style="color: #afb8c1;"> · </span>
-      <a href="README_AR.md"><strong>العربية</strong></a>
+      <span style="color: #afb8c1;"> / </span>
+      <a href="README_CN.md"><strong>Chinese</strong></a>
     </p>
     <p style="margin: 0 0 18px; padding-bottom: 16px; border-bottom: 1px solid #eaeef2; line-height: 2;">
       <a href="https://ai.quantdinger.com"><strong>SaaS</strong></a>
@@ -87,7 +77,7 @@ curl -fsSL https://raw.githubusercontent.com/brokermr810/QuantDinger/main/instal
 
 默认安装到 `~/quantdinger`（自定义：`… | bash -s -- /opt/quantdinger`）。重复执行同一命令可拉取最新镜像并重启。
 
-然后打开 **`http://localhost:8888`**，使用 **`quantdinger` / `123456`** 登录，并**修改默认管理员密码**。
+然后打开 **`http://localhost:8888`**，使用安装器中输入的管理员账号和密码登录。
 
 <details>
 <summary><b>Windows、手动克隆或镜像加速排错</b></summary>
@@ -169,7 +159,7 @@ QuantDinger 是**可自托管、本地优先**的量化基础设施层——不�
 | **多 venue 执行** | CCXT 加密货币（Binance、OKX、Bybit…）、**IBKR** 美股、**MT5** 外汇、**Alpaca** 美股/ETF/加密货币——统一经纪商账户页，多租户会话隔离。 |
 | **生产级基础设施** | **PostgreSQL 16** + **Redis 7**、连接池、后台 Worker（挂单、组合监控、反思任务）、幂等 schema 引导、GHCR 多架构镜像（amd64/arm64）。 |
 | **安全默认开启** | 拒绝默认 `SECRET_KEY`、Agent token 哈希存储、**默认仅纸面交易**（服务端显式解锁才可实盘）、每次 Agent 调用写审计日志。 |
-| **运营商就绪** | OAuth、多用户角色、积分/会员/USDT 计费开关、AWS Marketplace AMI、7 语言文档——可在此基础上做商业化量化产品，而不只是 hobby bot。 |
+| **运营商就绪** | OAuth、多用户角色、积分/会员/USDT 计费开关、AWS Marketplace AMI、11 语种 Web UI 与多语言文档——可在此基础上做商业化量化产品，而不只是 hobby bot。 |
 
 <details>
 <summary><b>更多安装方式（仅 GHCR、构建说明）</b></summary>
@@ -262,7 +252,7 @@ QuantDinger 自带 **Agent Gateway**（`/api/agent/v1`）和已发布到 PyPI �
 - **构建** — 专业 K 线图表；`IndicatorStrategy`（dataframe `buy`/`sell` 信号）与 `ScriptStrategy`（`on_bar`、`ctx.buy()` / `ctx.sell()`）；AI 生成代码作起点，Python 为最终真相源。
 - **验证** — 服务端回测：资金曲线、回撤指标、成交日志、策略快照——非纯前端「假回测」。
 - **运营** — 实盘策略机器人、快速交易、**10+ 加密货币交易所**（CCXT）、**IBKR** / **MT5** / **Alpaca**（美股、ETF、加密货币）；统一**经纪商账户页**；Telegram、邮件、短信、Discord、Webhook 通知。
-- **平台** — Docker Compose + GHCR 镜像、PostgreSQL 16、Redis 7、OAuth、多用户 RBAC、积分/会员/USDT 计费开关、AWS Marketplace AMI、7 语言文档。
+- **平台** — Docker Compose + GHCR 镜像、PostgreSQL 16、Redis 7、OAuth、多用户 RBAC、积分/会员/USDT 计费开关、AWS Marketplace AMI、11 语种 Web UI 与多语言文档。
 
 ## 架构
 
@@ -402,11 +392,11 @@ docker compose -f docker-compose.ghcr.yml up -d
 
 ```env
 # 常规场景：前后端同步 pin 到同一个 tag
-IMAGE_TAG=3.0.22
+IMAGE_TAG=4.0.1
 
 # 进阶（按需启用）：单独覆盖某一边，另一边仍跟随 IMAGE_TAG
-# BACKEND_TAG=v3.0.9
-# FRONTEND_TAG=v3.1.0-rc1
+# BACKEND_TAG=4.0.1
+# FRONTEND_TAG=4.0.1
 
 # BACKEND_IMAGE=ghcr.io/<你的fork>/quantdinger-backend     # 可选，用于 fork
 # FRONTEND_IMAGE=ghcr.io/<你的fork>/quantdinger-frontend
@@ -436,13 +426,24 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 默认管理员（生产环境请立即修改）：
 
 - 用户名：`quantdinger`
-- 密码：`123456`（来自 `env.example`；也可在首次登录前于 `.env` 中设置 `ADMIN_USER` / `ADMIN_PASSWORD`）
+- 密码：使用一行安装器时为安装过程中输入的密码；手动部署时读取 `.env` 中的 `ADMIN_PASSWORD`。
+
+如果 `ADMIN_PASSWORD` 不是 `123456`，系统会认为默认管理员已安全初始化，不再弹出首次改密提醒；如果旧数据库里仍保存着 `123456`，后端启动时会把首个管理员密码同步为当前 `.env` 的非默认值。
 
 请在 `backend_api_python/.env` 中把 **`FRONTEND_URL`** 设为用户实际访问的完整地址（含 `https://` 反代场景），以免影响跳转、部分跨域相关逻辑与生成链接。
 
 ### 6）可选：打开 AI 能力
 
 AI 分析、自然语言生成代码等需至少配置一个 LLM 供应商。打开 `backend_api_python/env.example` 中的 **AI / LLM** 小节，将对应变量复制到你的 `.env`（例如 `LLM_PROVIDER` + `OPENROUTER_API_KEY`）。修改后需**重启 backend 容器**。
+
+AtlasCloud 也已作为 OpenAI-compatible 供应商接入。参考官方 [AtlasCloud LLM API 文档](https://www.atlascloud.ai/docs/models/llm) 和 [API Key 指南](https://www.atlascloud.ai/docs/api-keys)，然后配置：
+
+```env
+LLM_PROVIDER=atlascloud
+ATLASCLOUD_API_KEY=your_api_key
+ATLASCLOUD_MODEL=openai/gpt-5.4
+ATLASCLOUD_BASE_URL=https://api.atlascloud.ai/v1
+```
 
 现货全仓平仓若因手续费导致「可卖数量略小于持仓」，可在管理后台 **设置 → 实盘交易（Live Trading）** 调整 `SPOT_CLOSE_SAFETY_RATIO`（平仓安全系数，默认 `0.998`）与 `SPOT_OPEN_QUOTE_BUFFER`（开仓占用 USDT 比例，默认 `0.995`）；也可直接写入 `backend_api_python/.env`。保存设置后会热加载，无需重建镜像。
 
@@ -507,11 +508,26 @@ df = df.copy()
 sma_short = df["close"].rolling(sma_short_period).mean()
 sma_long = df["close"].rolling(sma_long_period).mean()
 
-buy = (sma_short > sma_long) & (sma_short.shift(1) <= sma_long.shift(1))
-sell = (sma_short < sma_long) & (sma_short.shift(1) >= sma_long.shift(1))
+def edge(signal):
+    signal = signal.fillna(False).astype(bool)
+    return signal & ~signal.shift(1).fillna(False)
 
-df["buy"] = buy.fillna(False).astype(bool)
-df["sell"] = sell.fillna(False).astype(bool)
+open_long = (sma_short > sma_long) & (sma_short.shift(1) <= sma_long.shift(1))
+open_short = (sma_short < sma_long) & (sma_short.shift(1) >= sma_long.shift(1))
+
+df["open_long"] = edge(open_long)
+df["close_long"] = edge(open_short)
+df["open_short"] = edge(open_short)
+df["close_short"] = edge(open_long)
+
+output = {
+    "name": my_indicator_name,
+    "plots": [
+        {"name": "SMA Short", "data": sma_short.fillna(0).tolist(), "color": "#FF9800", "overlay": True},
+        {"name": "SMA Long", "data": sma_long.fillna(0).tolist(), "color": "#3F51B5", "overlay": True},
+    ],
+    "signals": [],
+}
 ```
 
 完整示例见：
@@ -544,7 +560,7 @@ df["sell"] = sell.fillna(False).astype(bool)
 | 外汇 | MT5、OANDA | 通过 MT5 |
 | 期货 | 交易所与数据接入 | 数据与工作流支持 |
 
-> **经纪商账户页（`/broker-accounts`，v3.0.5+）** — IBKR、MT5、Alpaca 共用一个统一管理页面：每家券商各一个连接表单 + 账户 KPI + 持仓表 + 挂单表（含一键撤单）。多租户安全：通过 `BrokerSessionRegistry` 隔离每个用户的会话，一个用户重连不会把其他用户踢下线。
+> **经纪商账户页（`/broker-accounts`）** — IBKR、MT5、Alpaca 共用一个统一管理页面：每家券商各一个连接表单 + 账户 KPI + 持仓表 + 挂单表（含一键撤单）。多租户安全：通过 `BrokerSessionRegistry` 隔离每个用户的会话，一个用户重连不会把其他用户踢下线。
 
 ## 策略开发模式
 
@@ -597,16 +613,18 @@ QuantDinger/
 |--------|------|
 | 认证 | `SECRET_KEY`、`ADMIN_USER`、`ADMIN_PASSWORD` |
 | 数据库 | `DATABASE_URL` |
-| LLM / AI | `LLM_PROVIDER`、`OPENROUTER_API_KEY`、`OPENAI_API_KEY` |
+| LLM / AI | `LLM_PROVIDER`、`OPENROUTER_API_KEY`、`OPENAI_API_KEY`、`ATLASCLOUD_API_KEY` |
 | OAuth | `GOOGLE_CLIENT_ID`、`GITHUB_CLIENT_ID` |
 | 安全 | `TURNSTILE_SITE_KEY`、`ENABLE_REGISTRATION` |
 | 计费 | `BILLING_ENABLED`、`BILLING_COST_AI_ANALYSIS` |
 | 会员 | `MEMBERSHIP_MONTHLY_PRICE_USD`、`MEMBERSHIP_MONTHLY_CREDITS` |
 | USDT 支付 | `USDT_PAY_ENABLED`、`USDT_TRC20_XPUB`、`TRONGRID_API_KEY` |
-| 可选行情 API | `TWELVE_DATA_API_KEY`、`FINNHUB_API_KEY`、`TIINGO_API_KEY`、`ADANOS_API_KEY` |
+| 可选行情 API | `TWELVE_DATA_API_KEY`、`FINNHUB_API_KEY`、`TIINGO_API_KEY`、`TRADING_ECONOMICS_CLIENT`、`TRADING_ECONOMICS_KEY`、`ADANOS_API_KEY` |
 | 代理 | `PROXY_URL` |
 | 后台工作进程 | `ENABLE_PENDING_ORDER_WORKER`、`ENABLE_PORTFOLIO_MONITOR`、`ENABLE_REFLECTION_WORKER` |
 | AI 调优 | `ENABLE_AI_ENSEMBLE`、`ENABLE_CONFIDENCE_CALIBRATION`、`AI_ENSEMBLE_MODELS` |
+
+财经日历采用免费优先策略：默认使用无需 Key 的 AkShare/WallstreetCN 日历兜底源；如果你配置了 Trading Economics 正式凭证，则优先使用该国际日历源。Finnhub 的付费日历和社交情绪端点默认不会调用；只有在确认账号套餐支持后，才需要设置 `FINNHUB_FREE_ONLY=false`。
 
 ## 文档导航
 
@@ -616,12 +634,11 @@ QuantDinger/
 | [API 约定](API_CONVENTIONS.md) | 认证、响应封装、可见性分级 |
 | [更新日志](CHANGELOG.md) | 版本历史与迁移说明 |
 | [英文总览](../README.md) | 仓库根目录英文 README（与本文结构同步） |
-| [日本語](README_JA.md) · [한국어](README_KO.md) · [ไทย](README_TH.md) · [Tiếng Việt](README_VI.md) · [العربية](README_AR.md) | 精简版多语言 README（与英文/中文互补；深度说明仍以英文或本文为准） |
 | [多用户部署](multi-user-setup.md) | PostgreSQL 多用户部署 |
 | [云服务器部署](CLOUD_DEPLOYMENT_CN.md) | 域名、HTTPS、反向代理与生产部署 |
 | [Agent 环境设计](agent/AGENT_ENVIRONMENT_DESIGN.md) · [AI / Agent 集成](agent/AI_INTEGRATION_DESIGN.md) · [快速开始](agent/AGENT_QUICKSTART.md) · [OpenAPI](agent/agent-openapi.json) · [MCP 说明](../mcp_server/README.md) | 编码 Agent、网关、MCP（PyPI：`quantdinger-mcp`）；部分正文为英文 |
 
-**策略：** [EN](STRATEGY_DEV_GUIDE.md) · [CN](STRATEGY_DEV_GUIDE_CN.md) · [TW](STRATEGY_DEV_GUIDE_TW.md) · [JA](STRATEGY_DEV_GUIDE_JA.md) · [KO](STRATEGY_DEV_GUIDE_KO.md) · [跨品种 EN](CROSS_SECTIONAL_STRATEGY_GUIDE_EN.md) / [CN](CROSS_SECTIONAL_STRATEGY_GUIDE_CN.md) · [示例](examples/)
+**策略：** [EN](STRATEGY_DEV_GUIDE.md) · [CN](STRATEGY_DEV_GUIDE_CN.md) · [跨品种 EN](CROSS_SECTIONAL_STRATEGY_GUIDE_EN.md) / [CN](CROSS_SECTIONAL_STRATEGY_GUIDE_CN.md) · [示例](examples/)
 
 **集成与通知：** [IBKR](IBKR_TRADING_GUIDE_EN.md) · [MT5 EN](MT5_TRADING_GUIDE_EN.md) / [CN](MT5_TRADING_GUIDE_CN.md) · [OAuth EN](OAUTH_CONFIG_EN.md) / [CN](OAUTH_CONFIG_CN.md) · Telegram / Email / SMS：同目录下 `NOTIFICATION_*` 配置文件（中/英文件名见各文档标题）。
 

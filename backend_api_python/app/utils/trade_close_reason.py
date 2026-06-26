@@ -56,7 +56,7 @@ _LABELS_ZH: Dict[str, str] = {
     GRID_OUT_OF_BOUNDS_DOWN: "网格下轨突破平仓",
     SERVER_STOP_LOSS: "止损平仓",
     SERVER_TAKE_PROFIT: "止盈平仓",
-    SERVER_TRAILING_STOP: "移动止盈平仓",
+    SERVER_TRAILING_STOP: "追踪止损平仓",
     INDICATOR_SIGNAL: "信号触发平仓",
     LEGACY_SIGNAL_TRIGGER: "信号触发平仓",
 }
@@ -135,7 +135,6 @@ def resolve_close_reason_for_record(
     if bot_type in ("grid", "dca"):
         return infer_legacy_close_reason(trade_type, bot_type=bot_type, stored_reason="")
     # Indicator/script closes without an explicit reason: leave empty so UI uses
-    # per-side copy (信号触发平多/平空), not a generic bucket label.
     return ""
 
 
